@@ -489,10 +489,14 @@ def sweep_feature_count(Xtr: pd.DataFrame, ytr: np.ndarray, Xte: pd.DataFrame, y
     p = Xtr.shape[1]
     kf = KFold(5, shuffle=True, random_state=int(seed))
     rows = []
+    cv_method = method
+    if method.startswith("order:"):  # 折內篩選時欄位名稱會變成編號, 固定順序也要改用欄位編號
+        pos = {c: i for i, c in enumerate(Xtr.columns)}
+        cv_method = "order:" + "|".join(str(pos[c]) for c in method[6:].split("|") if c in pos)
     for kk in range(1, p + 1):
         sel, _ = select_features(method, Xtr, ytr, kk, c_thr, p_thr)
         yh = LinearRegression().fit(Xtr[sel].values, ytr).predict(Xte[sel].values)
-        pipe = Pipeline([("sel", FeatureSelector(method, kk, c_thr, p_thr)), ("lr", LinearRegression())])
+        pipe = Pipeline([("sel", FeatureSelector(cv_method, kk, c_thr, p_thr)), ("lr", LinearRegression())])
         cv = cross_validate(pipe, Xtr.values.astype(float), ytr, cv=kf, scoring="neg_root_mean_squared_error")
         rows.append({"特徵數": kk, "保留特徵": "[" + ", ".join(sel) + "]", "RMSE": _rmse(yte, yh),
                      "R²": float(r2_score(yte, yh)), "CV RMSE (訓練集)": float(-cv["test_score"].mean()),

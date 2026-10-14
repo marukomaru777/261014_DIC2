@@ -7,7 +7,7 @@
 
 ![RMSE & R-squared by Number of Features](assets/rmse_r2_by_features.png)
 
-> 上圖：特徵數量 1～5 的 RMSE 與 R² 變化。測試集 RMSE 在 2 個特徵（R&D Spend、Marketing Spend）最低；加入 State 虛擬變數後 RMSE 上升，且第 5 個特徵（State_California）因 One-Hot 完全共線（dummy variable trap）而沒有帶來任何新資訊。
+> 上圖：特徵數量 k = 1～5 的測試集 RMSE 與 R²。特徵依序加入 R&D Spend → Marketing Spend → State_New York → State_Florida → Administration（State_California 為基準類別，以 00 表示）。測試集 RMSE 在 **k = 2**（R&D Spend、Marketing Spend）最低（8,198.80，R² 0.9474）；之後 RMSE 逐步上升，加入第 5 個特徵 Administration 時明顯變差（9,137.99），代表多餘的特徵反而會降低泛化能力。
 
 ## 功能
 
