@@ -37,22 +37,21 @@ Python 3.9 以上皆可。
 ## 專案結構
 
 ```
-├── main.py              # Streamlit 主程式
+├── main.py              # Streamlit 主程式（本機與網頁 Demo 共用）
+├── index.html           # GitHub Pages Demo 入口（stlite）
 ├── requirements.txt
-├── data/                # 內建資料集（網路讀取失敗時的備援）
+├── data/                # 內建資料集（網路讀取失敗時的備援，Demo 也讀這裡）
 │   ├── 50_Startups.csv
 │   └── BostonHousing.csv
-├── assets/              # README 圖片
-├── docs/                # GitHub Pages Demo（stlite）
-└── sync_docs.sh         # 修改 main.py 後同步到 docs/
+└── assets/              # README 圖片
 ```
 
 ## Demo 網站部署（GitHub Pages）
 
 1. GitHub 倉庫 → **Settings → Pages**
-2. **Source** 選 `Deploy from a branch`，Branch 選 `main`、資料夾選 `/docs`，按 Save
+2. **Source** 選 `Deploy from a branch`，Branch 選 `main`、資料夾選 `/ (root)`，按 Save
 3. 約 1 分鐘後即可開啟 https://marukomaru777.github.io/261014_DIC2/
 
-修改程式後請先執行 `./sync_docs.sh` 再 commit。
+網頁會直接讀取根目錄的 `main.py` 與 `data/`，修改後 push 即可更新，不需要額外同步。
 
 > 瀏覽器版本受 Pyodide 限制，運算較慢（例如 Boston Housing 的 SFS 搜尋）；需要完整速度請本機執行或部署到 Streamlit Community Cloud。
