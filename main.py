@@ -348,6 +348,9 @@ def select_features(method: str, X: pd.DataFrame, y: np.ndarray, k: int, c_thr: 
                 sel.remove(worst["變數"])
             else:
                 break
+    elif method.startswith("order:"):  # 固定順序 (例如參考圖): 依指定順序取前 k 個, 沒列到的欄位接在後面
+        names = [c for c in method[6:].split("|") if c in cols]
+        sel = (names + [c for c in cols if c not in names])[:k]
     elif method.startswith("rank:"):
         sel = [cols[i] for i in _rank_order(method[5:], X, y, Xs, cvn)[:k]]
     elif method in ("lasso", "enet"):
@@ -590,8 +593,6 @@ board_simple = board_ar = None
 auto_ar_note = ""
 if model_kind == "multiple":
     default_feats = [c for c in cols if c != target]
-    if not is_custom and problem["key"] == "startups":  # 老師的設定: 不使用 Administration
-        default_feats = [c for c in default_feats if c != "Administration"]
     with st.sidebar.expander("特徵變數 (X)" + (" - 預設排除 Administration" if len(default_feats) < len(cols) - 1 else " - 預設全選"),
                              expanded=False):
         feats = st.multiselect("特徵變數 (X)", [c for c in cols if c != target],
@@ -651,10 +652,9 @@ if model_kind == "multiple":
     cat_feats = [c for c in feats if not pd.api.types.is_numeric_dtype(raw[c])]
     if cat_feats:
         oh_opts = ["完整 One-Hot (每個類別一欄, 如 100 / 010 / 001)", "移除一個基準類別 (n−1 欄, 避免虛擬變數陷阱)"]
-        oh_choice = ctrl_box.radio(f"類別特徵 ({', '.join(cat_feats)}) 的 One-Hot 編碼方式", oh_opts, horizontal=True,
+        oh_choice = ctrl_box.radio(f"類別特徵 ({', '.join(cat_feats)}) 的 One-Hot 編碼方式", oh_opts, index=1, horizontal=True,
                                    help="50 Startups 的 State 有 3 個州。完整 One-Hot: 每州一欄 (State_California / Florida / New York); "
-                                        "老師的 5 個特徵 = R&D Spend + Marketing Spend + 3 個州別欄。"
-                                        "移除基準類別: 只留 2 個州別欄, 另一州以 00 表示。")
+                                        "移除基準類別 (預設): 只留 2 個州別欄 (另一州以 00 表示), 搭配 R&D / Administration / Marketing 剛好 5 個特徵。")
         onehot_drop = oh_choice == oh_opts[1]
         if onehot_drop:
             bcols = ctrl_box.columns(len(cat_feats))
@@ -698,7 +698,7 @@ if model_kind == "multiple" and X_full_df.shape[1] >= 2:
         with st.expander("🔎 特徵篩選與 🏆 最佳模型選擇 (Filter / Wrapper / Embedded)", expanded=True):
             st.markdown("**① 選擇特徵篩選演算法**")
             c_a, c_b = st.columns([1, 2])
-            fs_cat = c_a.selectbox("篩選類別", list(FS_CATEGORIES.keys()), index=3)
+            fs_cat = c_a.selectbox("篩選類別", list(FS_CATEGORIES.keys()), index=0)
             m_names = list(FS_CATEGORIES[fs_cat].keys())
             fs_name = c_b.selectbox("篩選方法", m_names, index=0)
             fs_method = FS_METHODS[fs_name]
@@ -1229,8 +1229,17 @@ with tabs[4]:
     st.subheader(f"📉 {unit_cn} vs 模型表現 (RMSE / R²)")
     sweep, xcol, xlabel, sweep_note = None, "特徵數", "Number of Features", ""
     if model_kind == "multiple" and X_full_df.shape[1] >= 2:
+        REF_ORDER = ["R&D Spend", "Marketing Spend", "State_New York", "State_Florida", "Administration"]
+        use_ref = False
+        if all(c in X_full_df.columns for c in REF_ORDER):
+            use_ref = st.checkbox("使用參考網頁的特徵順序 (R&D → Marketing → NY → FL → Administration)", True,
+                                  help="參考網頁 (huanchen1107.github.io/AIoT-DIC2-MultipleLR) 的特徵加入順序無法由 F 檢定 / 互資訊 / Lasso / RFE 等演算法排出, "
+                                       "應為手動指定; 勾選可完全重現該圖, 取消則改用上方篩選方法的排序。")
         # 與上方「特徵篩選方法」一致: 能指定 k 的方法直接沿用; 其他方法改用重要性 / 係數大小排序後取前 k 個
-        if fs_method in K_BASED:
+        if use_ref:
+            sw_method, sw_name = "order:" + "|".join(REF_ORDER), "參考網頁的固定順序"
+            how = "依序加入 R&D Spend → Marketing Spend → State_New York → State_Florida → Administration (其餘欄位排最後)"
+        elif fs_method in K_BASED:
             sw_method, sw_name = fs_method, FS_NAME_OF[fs_method]
             how = "依該方法挑選 k 個特徵"
         else:
@@ -1242,7 +1251,7 @@ with tabs[4]:
                    "rf": "依隨機森林特徵重要度排序後取前 k 個",
                    "corr": "依 |r| 相關係數排序後取前 k 個"}.get(
                 fs_method, "此方法不指定 k, 改以 RFE (標準化係數遞迴消除) 的順序取前 k 個")
-        st.caption(f"📌 排序方法沿用上方設定：**{sw_name}** — {how}。")
+        st.caption(f"📌 特徵順序：**{sw_name}** — {how}。")
         if sw_method in ("sfs", "sfs_bwd") and X_full_df.shape[1] > 8:
             st.caption("⚠️ SFS 在特徵很多時需要較長時間, 首次計算請稍候 (之後有快取)。")
         sweep = sweep_feature_count(X_full_df.iloc[idx_tr], y_tr, X_full_df.iloc[idx_te], y_te, sw_method,
