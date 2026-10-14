@@ -278,6 +278,25 @@ def feature_diagnostics(X: pd.DataFrame, y: np.ndarray) -> pd.DataFrame:
     })
 
 
+def _rank_order(kind: str, X: pd.DataFrame, y: np.ndarray, Xs: np.ndarray, cvn: int) -> list:
+    """把『不指定 k』的方法轉成特徵排序 (由重要到不重要), 供『特徵數量 vs 表現』圖依序取前 k 個。
+    lasso / enet: |標準化係數| 大小; rf: 特徵重要度; corr: |r|; rfe: 標準化係數遞迴消除的順序。"""
+    p = X.shape[1]
+    tie = _abs_corr(X, y)  # 係數相同 (例如 Lasso 壓成 0) 時, 以 |r| 決定先後
+    if kind in ("lasso", "enet"):
+        mdl = (LassoCV(cv=cvn, max_iter=20000, random_state=0) if kind == "lasso"
+               else ElasticNetCV(l1_ratio=[0.2, 0.5, 0.8, 1.0], cv=cvn, max_iter=20000, random_state=0)).fit(Xs, y)
+        score = np.abs(mdl.coef_)
+    elif kind == "rf":
+        score = RandomForestRegressor(n_estimators=100, random_state=0).fit(X.values.astype(float), y).feature_importances_
+    elif kind == "corr":
+        score = tie
+    else:  # rfe
+        rk = RFE(LinearRegression(), n_features_to_select=1).fit(Xs, y).ranking_
+        score = -np.asarray(rk, dtype=float)
+    return [int(i) for i in sorted(range(p), key=lambda i: (-score[i], -tie[i]))]
+
+
 def select_features(method: str, X: pd.DataFrame, y: np.ndarray, k: int, c_thr: float, p_thr: float):
     """回傳 (被選中的特徵名稱, 逐步消除紀錄)。篩選只使用傳入的訓練資料, 避免資料洩漏。"""
     cols, p = list(X.columns), X.shape[1]
@@ -329,6 +348,8 @@ def select_features(method: str, X: pd.DataFrame, y: np.ndarray, k: int, c_thr: 
                 sel.remove(worst["變數"])
             else:
                 break
+    elif method.startswith("rank:"):
+        sel = [cols[i] for i in _rank_order(method[5:], X, y, Xs, cvn)[:k]]
     elif method in ("lasso", "enet"):
         mdl = (LassoCV(cv=cvn, max_iter=20000, random_state=0) if method == "lasso"
                else ElasticNetCV(l1_ratio=[0.2, 0.5, 0.8, 1.0], cv=cvn, max_iter=20000, random_state=0)).fit(Xs, y)
@@ -1208,14 +1229,25 @@ with tabs[4]:
     st.subheader(f"📉 {unit_cn} vs 模型表現 (RMSE / R²)")
     sweep, xcol, xlabel, sweep_note = None, "特徵數", "Number of Features", ""
     if model_kind == "multiple" and X_full_df.shape[1] >= 2:
-        k_names = [n for n, m in FS_METHODS.items() if m in K_BASED]
-        default_sw = FS_NAME_OF[fs_method] if fs_method in (K_BASED - {"sfs", "sfs_bwd"}) else FS_NAME_OF["kbest_mi"]  # SFS 較慢, 不當預設
-        sw_name = st.selectbox("特徵排序 / 篩選方法 (由此方法依序挑出 k 個特徵)", k_names, index=k_names.index(default_sw))
-        if FS_METHODS[sw_name] in ("sfs", "sfs_bwd") and X_full_df.shape[1] > 8:
+        # 與上方「特徵篩選方法」一致: 能指定 k 的方法直接沿用; 其他方法改用重要性 / 係數大小排序後取前 k 個
+        if fs_method in K_BASED:
+            sw_method, sw_name = fs_method, FS_NAME_OF[fs_method]
+            how = "依該方法挑選 k 個特徵"
+        else:
+            rank_kind = {"lasso": "lasso", "enet": "enet", "rf": "rf", "corr": "corr"}.get(fs_method, "rfe")
+            sw_method = "rank:" + rank_kind
+            sw_name = FS_NAME_OF.get(fs_method, "RFE 遞迴特徵消除")
+            how = {"lasso": "依 Lasso 標準化係數的絕對值大小排序後取前 k 個",
+                   "enet": "依 ElasticNet 標準化係數的絕對值大小排序後取前 k 個",
+                   "rf": "依隨機森林特徵重要度排序後取前 k 個",
+                   "corr": "依 |r| 相關係數排序後取前 k 個"}.get(
+                fs_method, "此方法不指定 k, 改以 RFE (標準化係數遞迴消除) 的順序取前 k 個")
+        st.caption(f"📌 排序方法沿用上方設定：**{sw_name}** — {how}。")
+        if sw_method in ("sfs", "sfs_bwd") and X_full_df.shape[1] > 8:
             st.caption("⚠️ SFS 在特徵很多時需要較長時間, 首次計算請稍候 (之後有快取)。")
-        sweep = sweep_feature_count(X_full_df.iloc[idx_tr], y_tr, X_full_df.iloc[idx_te], y_te, FS_METHODS[sw_name],
+        sweep = sweep_feature_count(X_full_df.iloc[idx_tr], y_tr, X_full_df.iloc[idx_te], y_te, sw_method,
                                     int(seed), float(c_thr), float(p_thr))
-        sweep_note = f"以「{sw_name}」依序挑選 k 個特徵 (k = 1 … {X_full_df.shape[1]}), 用訓練集建模、在測試集評估"
+        sweep_note = f"以「{sw_name}」{how} (k = 1 … {X_full_df.shape[1]}), 用訓練集建模、在測試集評估"
     elif model_kind == "ar" and board_ar is not None:
         ar_sw = board_ar[board_ar["k"] >= 1]
         sweep = pd.DataFrame({"特徵數": ar_sw["k"].values, "保留特徵": ar_sw["保留特徵"].map(lambda t: f"[{t}]").values,
