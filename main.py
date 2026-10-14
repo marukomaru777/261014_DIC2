@@ -31,6 +31,13 @@ from sklearn.model_selection import KFold, TimeSeriesSplit, cross_val_score, cro
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
+# stlite (瀏覽器版) 內建的 pyarrow 是精簡版, 缺少 sklearn 檢查資料型態時用到的類別, 在此補上空殼
+if sys.platform == "emscripten":
+    import pyarrow as _pa
+    for _n in ("Table", "RecordBatch", "Array", "ChunkedArray"):
+        if not hasattr(_pa, _n):
+            setattr(_pa, _n, type(_n, (), {}))
+
 # ------------------------------------------------------------------
 # 常數: 兩種內建問題
 # ------------------------------------------------------------------
